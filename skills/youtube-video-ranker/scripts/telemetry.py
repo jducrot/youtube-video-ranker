@@ -14,7 +14,9 @@ Design goals:
 Commands (all accept --telemetry-dir, default ~/youtube-reports/.telemetry):
 
   log      generic event: --run-id R --stage S [--event E --video V --model M --kv k=v ...]
-  mark     stage boundary: --run-id R --name fetch_done [--kv ...]
+  mark     stage boundary: --run-id R --name fetch_done [--status ok|skipped|cached] [--kv ...]
+           Mark a stage when it ENDS. Use --status skipped/cached for a stage that did
+           no work (a cache-only re-run), so the timeline does not invent durations.
   agent    one finished subagent, numbers copied from the harness completion notice:
              --run-id R --kind inventory|factcheck [--video V] --model M
              --tokens N --duration-s S [--tool-uses T] [--points P]
@@ -48,6 +50,8 @@ from pathlib import Path
 
 DEFAULT_DIR = Path.home() / "youtube-reports" / ".telemetry"
 EVENTS_FILE = "events.jsonl"
+BATCH_GAP_SECONDS = 2.0   # marks closer together than this look batch-logged
+BATCH_RUN_LENGTH = 3      # ...if at least this many in a row
 
 
 def _events_path(d: Path) -> Path:
@@ -110,6 +114,7 @@ def cmd_log(args: argparse.Namespace) -> int:
 def cmd_mark(args: argparse.Namespace) -> int:
     rec = _base(args, "run", "mark")
     rec["name"] = args.name
+    rec["status"] = args.status
     rec.update(_kv(args.kv))
     line = _append(Path(args.telemetry_dir), rec)
     if args.echo:
@@ -235,15 +240,30 @@ def _report_run(rid, evs):
     if marks:
         print("TIMELINE (seconds since run_start; share of wall)")
         prev = t0
+        run_fast, worst_run = 0, 0
         for m in marks:
             dt = m["ts"] - prev
             share = (dt / span * 100) if span > 0 else 0
-            print(f"        {m.get('name','?'):<16} at {m['ts']-t0:6.0f}s   "
-                  f"+{dt:5.0f}s  {share:3.0f}%")
+            status = m.get("status", "ok")
+            tag = "" if status == "ok" else f"  [{status}]"
+            print(f"        {m.get('name','?'):<16} at {m['ts']-t0:6.1f}s   "
+                  f"+{dt:5.1f}s  {share:3.0f}%{tag}")
+            # Marks that claim real work but arrive under 2 s after the previous one
+            # were almost certainly logged in a batch; their durations mean nothing.
+            if status == "ok" and dt < BATCH_GAP_SECONDS:
+                run_fast += 1
+                worst_run = max(worst_run, run_fast)
+            else:
+                run_fast = 0
             prev = m["ts"]
         if re_ and t1 - prev > 1:
-            print(f"        {'(after last mark)':<16} at {span:6.0f}s   "
-                  f"+{t1-prev:5.0f}s  {(t1-prev)/span*100:3.0f}%")
+            print(f"        {'(after last mark)':<16} at {span:6.1f}s   "
+                  f"+{t1-prev:5.1f}s  {(t1-prev)/span*100:3.0f}%")
+        if worst_run >= BATCH_RUN_LENGTH:
+            print(f"        WARNING: {worst_run} consecutive marks arrived within "
+                  f"{BATCH_GAP_SECONDS:.0f}s of each other. They were probably logged in a "
+                  "batch, so the durations above are not real. Mark each stage when it ends, "
+                  "or use --status skipped for stages that did not run.")
     else:
         print("TIMELINE  no stage marks logged; wall time is not attributable")
 
@@ -366,6 +386,8 @@ def main() -> int:
     pm = sub.add_parser("mark", help="record a stage boundary")
     pm.add_argument("--run-id", required=True)
     pm.add_argument("--name", required=True)
+    pm.add_argument("--status", choices=("ok", "skipped", "cached"), default="ok",
+                    help="'skipped' or 'cached' for a stage that did no real work this run")
     pm.add_argument("--kv", nargs="*", default=None)
     pm.add_argument("--echo", action="store_true")
     pm.set_defaults(func=cmd_mark)

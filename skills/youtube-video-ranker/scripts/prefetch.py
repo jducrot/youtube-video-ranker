@@ -40,6 +40,11 @@ from pathlib import Path
 CACHE_DIR = Path.home() / "youtube-reports" / ".cache"
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 MIN_OVERLAP_WORDS = 2   # de-overlap only collapses repeats of at least this many words
+# Bump this whenever deoverlap() changes behaviour. A cache whose _deoverlap_version
+# differs is re-derived from its raw sidecar (<id>.raw.json) the next time prefetch
+# sees it; the youtube-claims cache then misses on the new transcript hash and the
+# inventory is redone, which is what you want after a cleaning bug fix.
+DEOVERLAP_VERSION = 2
 ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
 
 
@@ -286,6 +291,7 @@ def ensure_deoverlapped(vid: str) -> int:
     """Clean the cached transcript in place (idempotent). Returns the byte size
     of the transcript array that Phase B will read."""
     p = CACHE_DIR / f"{vid}.json"
+    raw_p = CACHE_DIR / f"{vid}.raw.json"
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
@@ -293,21 +299,42 @@ def ensure_deoverlapped(vid: str) -> int:
     tr = d.get("transcript")
     if not isinstance(tr, list) or not tr:
         return 0
-    if d.get("_deoverlapped"):
+    if d.get("_deoverlap_version") == DEOVERLAP_VERSION:
         return len(json.dumps(tr, ensure_ascii=False))
-    clean = deoverlap(tr)
+
+    # Where does the raw caption text come from?
+    #   1. a sidecar written the first time we processed this video (best: lets a
+    #      fix to the cleaning code be re-applied without re-fetching), or
+    #   2. a cache written by older code that had no sidecar: the raw text is gone,
+    #      so leave it alone rather than clean already-cleaned text twice.
+    if raw_p.exists():
+        try:
+            source = json.loads(raw_p.read_text(encoding="utf-8")).get("transcript") or tr
+        except Exception:
+            source = tr
+    elif d.get("_deoverlapped"):
+        return len(json.dumps(tr, ensure_ascii=False))     # legacy: processed, raw not kept
+    else:
+        source = tr
+        raw_p.write_text(json.dumps({"video_id": vid, "transcript": tr}, ensure_ascii=False),
+                         encoding="utf-8")
+
+    clean = deoverlap(source)
     # Safety: never destroy content. Require the cleaned text to retain a
     # sane share of the raw's unique character mass; otherwise keep raw.
-    raw_chars = len(_norm_ws(" ".join(s.get("text", "") for s in tr)))
+    raw_chars = len(_norm_ws(" ".join(s.get("text", "") for s in source)))
     clean_chars = len(" ".join(s["text"] for s in clean))
     if not clean or clean_chars < 0.25 * raw_chars:
+        d["transcript"] = source
         d["_deoverlapped"] = True  # mark so we don't retry a no-win every run
         d["_deoverlap_skipped"] = True
+        d["_deoverlap_version"] = DEOVERLAP_VERSION
         p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-        return len(json.dumps(tr, ensure_ascii=False))
+        return len(json.dumps(source, ensure_ascii=False))
     d["transcript"] = clean
     d["_deoverlapped"] = True
-    d["_raw_segments"] = len(tr)
+    d["_deoverlap_version"] = DEOVERLAP_VERSION
+    d["_raw_segments"] = len(source)
     d["_clean_segments"] = len(clean)
     p.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     return len(json.dumps(clean, ensure_ascii=False))

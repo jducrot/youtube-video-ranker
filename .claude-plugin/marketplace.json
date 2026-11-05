@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "youtube-video-ranker",
+  "owner": {
+    "name": "Jean Ducrot"
+  },
+  "description": "Install youtube-video-ranker as a Claude plugin. Its helper scripts ship with it, so an update can't silently drop them.",
+  "plugins": [
+    {
+      "name": "youtube-video-ranker",
+      "source": "./",
+      "description": "Rank YouTube videos on one topic to decide which to watch.",
+      "license": "MIT",
+      "keywords": ["youtube", "research", "fact-checking", "video", "ranking"]
+    }
+  ]
+}
