@@ -47,3 +47,18 @@ One A/B with a single run per side: a Sonnet / medium-effort orchestrator agains
 - Stage marks make wall-clock attributable. In the batch, about 40% of the 884 s ran between stages with nothing logged.
 - Fact-check results are ingested from the agents' JSON, because hand-typed events had miscounted the searches (24 logged, 23 real).
 - The telemetry sample in `examples/` contains harness numbers that were backfilled after the run, marked `backfilled=1`.
+
+## A review that found the skill had lost its scripts
+
+After the pipeline was built, a review of the telemetry and the live files turned up problems that the tests had not caught, because they sat between the pieces.
+
+| Finding | Evidence | Fix |
+|---|---|---|
+| The live skill had been replaced by a single-file copy with no scripts | The skill folder's `SKILL.md` was rewritten at a later time, was 16.6 KB, and `scripts/` was gone. This is inferred to be an account-side sync; the repo copy was the only place the work survived. | Ship as a plugin so scripts travel with the skill; Step 0 refuses to run without them |
+| The scorer silently dropped a mistyped point id | A one-character typo gave exit 0, no message, 2 of 3 points counted, and a plausible score (96.5 vs 97.4) | Validation: unknown ids are errors |
+| Scoring input was hand-built and never saved | Key-point membership was typed by the orchestrator; the analysis lived in a scratch folder; two analyses of one video pair scored 90.9/87.8 and 80.9/79.2 and could not be compared | Persisted `keypoints.json` and `verdicts.json`, a builder that checks every link |
+| Stage timings were not real | Five marks landed within 0.7 s after a 40 s gap, so one stage was credited with 99% of the run | Mark status plus a burst warning |
+| No guard against instructions hidden in untrusted text | The subagent brief did not say to treat transcripts as data | Guard in both briefs, plus a phrase scan |
+| A cleaner fix could not be re-applied | The cleaned transcript replaced the raw one; the earlier word-dropping bug was sized by re-fetching | Raw cues kept in a sidecar; cleaner versioned |
+
+The scan found no instruction-like phrases in 14 real cached transcripts, so it has not been tested on a real attack, only on unit tests. The input builder has been tested on synthetic caches, not yet on a full real run.

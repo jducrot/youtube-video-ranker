@@ -100,3 +100,41 @@ def test_shorter_video_with_same_points_scores_higher_on_density(run_scorer):
                        _video("long", ["K1", "K2"], minutes=50)], "points": PTS[:2]}
     ranked = run_scorer(data)["ranked"]
     assert ranked[0]["id"] == "short"
+
+
+# ------------------------------------------------------------------ validation
+# A mistyped point id used to be dropped silently: the video just lost a point and
+# still got a plausible score. These tests pin the new behaviour.
+
+def test_unknown_point_id_is_an_error_not_a_silent_drop(run_scorer_raw):
+    d = {"videos": [_video("a", ["K1", "K2", "K33"])], "points": PTS}
+    r = run_scorer_raw(d)
+    assert r.returncode == 2 and r.stdout == ""
+    assert "unknown point ids" in r.stderr and "K33" in r.stderr
+
+
+def test_duplicate_ids_are_errors(run_scorer_raw):
+    dup_point = {"videos": [_video("a", ["K1"])], "points": PTS + make_points(("K1", True, "SUPPORTED"))}
+    dup_video = {"videos": [_video("a", ["K1"]), _video("a", ["K2"])], "points": PTS}
+    assert "duplicate point id" in run_scorer_raw(dup_point).stderr
+    assert "duplicate video id" in run_scorer_raw(dup_video).stderr
+
+
+def test_bad_verdict_and_bad_relevance_are_errors(run_scorer_raw):
+    bad_verdict = {"videos": [_video("a", ["K1"])], "points": make_points(("K1", True, "KINDA_TRUE"))}
+    bad_rel = {"videos": [_video("a", ["K1"], relevance=1.5)], "points": PTS[:1]}
+    assert "unknown verdict" in run_scorer_raw(bad_verdict).stderr
+    assert "outside 0 to 1" in run_scorer_raw(bad_rel).stderr
+
+
+def test_malformed_input_exits_2_with_a_message(run_scorer_raw):
+    assert run_scorer_raw("not json").returncode == 2
+    assert "videos" in run_scorer_raw({"nope": 1}).stderr
+
+
+def test_soft_problems_are_warnings_in_the_output(run_scorer):
+    d = {"videos": [_video("a", ["K1"]), _video("empty", [])], "points": PTS}   # K2, K3 unused
+    out = run_scorer(d)
+    joined = " ".join(out["warnings"])
+    assert "no key points" in joined and "not referenced" in joined
+    assert out["scorer_version"] == "2"

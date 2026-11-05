@@ -1,11 +1,8 @@
-"""Shared fixtures: load the skill's scripts without installing anything, and
-pull the scorer out of SKILL.md (it is embedded there so the skill stays a
-single portable file; the tests treat SKILL.md as the one source of truth)."""
+"""Shared fixtures: load the skill's scripts without installing anything."""
 from __future__ import annotations
 
 import importlib.util
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL_DIR = ROOT / "skill"
+SKILL_DIR = ROOT / "skills" / "youtube-video-ranker"
 SCRIPTS = SKILL_DIR / "scripts"
 
 
@@ -31,28 +28,38 @@ def prefetch():
 
 
 @pytest.fixture(scope="session")
+def rank_tools():
+    return _load("rank_tools_mod", SCRIPTS / "rank_tools.py")
+
+
+@pytest.fixture(scope="session")
 def telemetry_path() -> Path:
     return SCRIPTS / "telemetry.py"
 
 
 @pytest.fixture(scope="session")
-def scorer_path(tmp_path_factory) -> Path:
-    text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
-    m = re.search(r"```python\n(#!/usr/bin/env python3\n\"\"\"Score and rank.*?)\n```",
-                  text, re.S)
-    assert m, "scorer code block not found in SKILL.md"
-    p = tmp_path_factory.mktemp("scorer") / "rank_videos.py"
-    p.write_text(m.group(1), encoding="utf-8")
-    return p
+def scorer_path() -> Path:
+    return SCRIPTS / "rank_videos.py"
 
 
 @pytest.fixture(scope="session")
 def run_scorer(scorer_path):
+    """Run the scorer; returns the parsed output. Raises if it exits non-zero."""
     def _run(data: dict) -> dict:
         out = subprocess.run([sys.executable, "-I", str(scorer_path)],
                              input=json.dumps(data), capture_output=True,
                              text=True, check=True)
         return json.loads(out.stdout)
+    return _run
+
+
+@pytest.fixture(scope="session")
+def run_scorer_raw(scorer_path):
+    """Run the scorer; returns the CompletedProcess without raising."""
+    def _run(data) -> subprocess.CompletedProcess:
+        payload = data if isinstance(data, str) else json.dumps(data)
+        return subprocess.run([sys.executable, "-I", str(scorer_path)],
+                              input=payload, capture_output=True, text=True)
     return _run
 
 
