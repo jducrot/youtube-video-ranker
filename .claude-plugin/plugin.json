@@ -1,7 +1,7 @@
 {
   "name": "youtube-video-ranker",
   "description": "Rank YouTube videos on one topic to decide which to watch: key points per minute, fact-checked claims, relevance to your goal, and a watch order with timestamps.",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "author": {
     "name": "Jean Ducrot"
   },

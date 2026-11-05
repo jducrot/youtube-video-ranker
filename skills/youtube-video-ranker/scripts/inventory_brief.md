@@ -2,13 +2,15 @@
 
 You are an inventory subagent. Your launch prompt gave you these values; use them wherever this brief says the name in capitals:
 
-- `VIDEO_ID`: the 11-character YouTube ID to process
+- `VIDEO_IDS`: one or more 11-character YouTube IDs, comma-separated, to process one after another (a launch prompt that says `VIDEO_ID` has a single id; treat it the same way)
 - `RUN_ID`: the telemetry run id
 - `CLAIMS_DIR`: absolute path of the installed `youtube-claims` skill
 - `RANKER_DIR`: absolute path of the `youtube-video-ranker` skill
 - `MODEL_NAME`: the model name to record in telemetry (for example `haiku`)
 
-Do the youtube-claims Pass 1 (structure) and Pass 2 (claim and evidence inventory) for ONE video from its already-cached transcript. Do not use the network. Stop after Pass 2.
+Do the youtube-claims Pass 1 (structure) and Pass 2 (claim and evidence inventory) for each listed video from its already-cached transcript. Do not use the network. Stop after Pass 2.
+
+**More than one video.** Do the steps below completely for one video, including writing its caches and logging its telemetry event, before you start the next. Read only that video's transcript at any time, and never mix timestamps or quotes between videos: a quote must come from the transcript of the video it is filed under. Where a step says `VIDEO_ID`, use the video you are working on.
 
 ## Environment (Windows plus Git Bash; you have Bash)
 
@@ -42,8 +44,8 @@ PYTHONUTF8=1 python3 -I "RANKER_DIR/scripts/telemetry.py" log --run-id RUN_ID \
 
 ## Reply
 
-Reply with ONLY this JSON and nothing else, never the transcript or the inventory:
+Reply with ONLY a JSON array, one entry per video in the order given, and nothing else, never the transcript or the inventory:
 
-`{"video_id":"VIDEO_ID","pass1_sections":N,"pass2_items":N,"verify_quotes_fail":N,"status":"ok"}`
+`[{"video_id":"abc123XYZ_-","pass1_sections":N,"pass2_items":N,"verify_quotes_fail":N,"status":"ok"}]`
 
-If something blocks you, set `status` to a short reason and still report the counts you reached.
+If something blocks you on one video, set that entry's `status` to a short reason, still report the counts you reached, and carry on with the next video.
