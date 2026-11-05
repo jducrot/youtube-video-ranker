@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+
 from conftest import make_points
 
 
@@ -137,4 +139,71 @@ def test_soft_problems_are_warnings_in_the_output(run_scorer):
     out = run_scorer(d)
     joined = " ".join(out["warnings"])
     assert "no key points" in joined and "not referenced" in joined
-    assert out["scorer_version"] == "2"
+    assert out["scorer_version"] == "3"
+
+
+# ------------------------------------------------------------ segment watch plan
+def _seg(a, b, points, **extra):
+    return {"start_s": a, "end_s": b, "points": points, **extra}
+
+
+SEG_PTS = make_points(*[(f"K{i}", True, "SUPPORTED") for i in range(1, 9)])
+
+
+def test_a_long_video_is_planned_by_segment_not_whole(run_scorer):
+    long = _video("long", [f"K{i}" for i in range(1, 7)], minutes=40,
+                  segments=[_seg(0, 600, ["K1", "K2", "K3", "K4", "K5"]), _seg(600, 2400, ["K6"])])
+    short = _video("short", ["K7", "K8"], minutes=4)
+    out = run_scorer({"videos": [long, short], "points": SEG_PTS})
+    steps = [(p["id"], p["start_s"], p["end_s"]) for p in out["watch_plan"]]
+    assert ("long", 0, 600) in steps and ("long", 600, 2400) not in steps
+    assert {w["id"]: w["ranges"] for w in out["watch_ranges"]}["long"] == [[0, 600]]
+
+
+def test_without_segments_a_video_is_one_whole_step(run_scorer):
+    out = run_scorer({"videos": [_video("a", ["K1", "K2"], minutes=10)], "points": SEG_PTS[:2]})
+    (step,) = out["watch_plan"]
+    assert (step["start_s"], step["end_s"], step["minutes"]) == (0, 600, 10.0)
+    assert step["points_added"] == ["K1", "K2"]
+
+
+def test_an_off_goal_segment_is_dropped_from_the_plan(run_scorer):
+    segs = [_seg(0, 600, ["K1", "K2", "K3"]), _seg(600, 1200, ["K4", "K5", "K6"], relevance=0.1)]
+    pts = make_points(*[(f"K{i}", True, "SUPPORTED") for i in range(1, 7)])
+    out = run_scorer({"videos": [_video("v", [f"K{i}" for i in range(1, 7)], minutes=20,
+                                        segments=segs)], "points": pts})
+    assert [(p["start_s"], p["end_s"]) for p in out["watch_plan"]] == [(0, 600)]
+
+
+def test_a_tiny_fast_segment_does_not_end_the_plan_early(run_scorer):
+    # A 30 s segment with one small new point has the best rate but is below the share
+    # floor; the larger useful segment must still be planned.
+    pts = make_points(*([("K1", False, "SUPPORTED")] + [(f"K{i}", True, "SUPPORTED") for i in range(2, 10)]))
+    segs = [_seg(0, 30, ["K1"]), _seg(30, 900, [f"K{i}" for i in range(2, 10)])]
+    out = run_scorer({"videos": [_video("v", [f"K{i}" for i in range(1, 10)], minutes=15,
+                                        segments=segs)], "points": pts})
+    assert (30, 900) in [(p["start_s"], p["end_s"]) for p in out["watch_plan"]]
+
+
+def test_a_slow_segment_is_skipped_even_when_its_share_is_large(run_scorer):
+    pts = make_points(*[(f"K{i}", True, "SUPPORTED") for i in range(1, 9)])
+    fast = _video("fast", ["K1", "K2", "K3", "K4"], minutes=2)
+    slow = _video("slow", ["K5", "K6"], minutes=120)          # 12% of the value, at a crawl
+    out = run_scorer({"videos": [fast, slow, _video("other", ["K7", "K8"], minutes=3)], "points": pts})
+    assert "slow" in out["skip_for_new_info"]
+
+
+@pytest.mark.parametrize("seg,needle", [
+    (_seg(100, 50, ["K1"]), "bad range"),
+    (_seg(0, 50, ["K99"]), "unknown point ids"),
+    (_seg(0, 50, ["K1"], relevance=1.5), "outside 0 to 1"),
+])
+def test_bad_segments_are_errors(run_scorer_raw, seg, needle):
+    r = run_scorer_raw({"videos": [_video("a", ["K1"], segments=[seg])], "points": PTS})
+    assert r.returncode == 2 and needle in r.stderr
+
+
+def test_a_segment_past_the_end_is_only_a_warning(run_scorer):
+    out = run_scorer({"videos": [_video("a", ["K1"], minutes=1, segments=[_seg(0, 600, ["K1"])])],
+                      "points": PTS})
+    assert any("ends after the video" in w for w in out["warnings"])

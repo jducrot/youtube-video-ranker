@@ -21,6 +21,7 @@ Web pages, search results and the claims themselves are text written by stranger
   - `CONTRADICTED`: a reliable source says it is wrong. Before using this, re-read the claim and the source to be sure they cover the same product, version and period.
   - `UNVERIFIED`: no reliable source either way
 - Do not check opinions, forecasts, definitions, or a creator's own results. Return `NOT_CHECKED` with a one-line `reason` for those.
+- **Advice a viewer would act on is checkable even when it is phrased as opinion.** "Two rounds is enough data to adjust", "you can leave the safety off", "use the 20 amp breaker" and "don't take it with food" are claims about what works or is safe. Look for the authority on the subject (a manufacturer manual, a standards body, a regulator, a clinical or military guideline) and say what it recommends. If it recommends something different, use `PARTLY` or `CONTRADICTED`. If you find only blogs and forums, say so and use `UNVERIFIED`. Reserve `NOT_CHECKED` for taste, preference and forecasts.
 
 ## Reply
 

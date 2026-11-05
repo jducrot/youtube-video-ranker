@@ -18,8 +18,10 @@ Commands (all accept --telemetry-dir, default ~/youtube-reports/.telemetry):
            Mark a stage when it ENDS. Use --status skipped/cached for a stage that did
            no work (a cache-only re-run), so the timeline does not invent durations.
   agent    one finished subagent, numbers copied from the harness completion notice:
-             --run-id R --kind inventory|factcheck [--video V] --model M
+             --run-id R --kind inventory|factcheck [--video V | --videos V1,V2] --model M
              --tokens N --duration-s S [--tool-uses T] [--points P]
+           --videos is for an inventory agent that handled a batch of short videos;
+           the report then compares tokens per item and quote failures, solo vs batched.
   ingest-factcheck
            read fact-check results (a JSON array of {id, verdict, searches, ...},
            or several arrays concatenated into one list) and write one
@@ -125,7 +127,13 @@ def cmd_mark(args: argparse.Namespace) -> int:
 def cmd_agent(args: argparse.Namespace) -> int:
     rec = _base(args, args.kind, "agent")
     rec["kind"] = args.kind
-    if args.video:
+    vids = [v for v in (args.videos or "").split(",") if v]
+    if vids:
+        # one agent handled several videos: keep the list, and the first id as "video"
+        rec["videos"] = vids
+        rec["batch_size"] = len(vids)
+        rec["video"] = vids[0]
+    elif args.video:
         rec["video"] = args.video
     if args.model:
         rec["model"] = args.model
@@ -310,8 +318,24 @@ def _report_run(rid, evs):
             # fixed-cost floor: tokens ~ a + b*units
             if kind == "inventory":
                 items = {e.get("video"): int(e.get("pass2_items", 0)) for e in invs}
-                pairs = [(items[a["video"]], int(a["tokens"])) for a in ag
-                         if a.get("video") in items]
+                vq = {e.get("video"): int(e.get("verify_quotes_fail", 0)) for e in invs}
+                pairs, by_mode = [], {"solo": [0, 0, 0, 0], "batched": [0, 0, 0, 0]}
+                for a in ag:
+                    vids = a.get("videos") or [a.get("video")]
+                    if not all(v in items for v in vids):
+                        continue
+                    n_items = sum(items[v] for v in vids)
+                    pairs.append((n_items, int(a["tokens"])))
+                    m = by_mode["batched" if len(vids) > 1 else "solo"]
+                    m[0] += 1                      # agents
+                    m[1] += int(a["tokens"])
+                    m[2] += n_items
+                    m[3] += sum(vq.get(v, 0) for v in vids)
+                if by_mode["batched"][0]:
+                    for mode, (n_ag, tk, it, f) in by_mode.items():
+                        if n_ag and it:
+                            print(f"                   {mode:<8} agents={n_ag}  tokens/item={tk/it:,.0f}  "
+                                  f"quote fixes={f} ({f/it*100:.1f}% of quotes)")
                 fit = _ols([p[0] for p in pairs], [p[1] for p in pairs])
                 if fit:
                     a0, b, r2 = fit
@@ -396,6 +420,8 @@ def main() -> int:
     pa.add_argument("--run-id", required=True)
     pa.add_argument("--kind", required=True)
     pa.add_argument("--video", default=None)
+    pa.add_argument("--videos", default=None,
+                    help="comma-separated ids when one agent inventoried several videos")
     pa.add_argument("--model", default=None)
     pa.add_argument("--tokens", type=int, required=True)
     pa.add_argument("--duration-s", type=float, required=True)
