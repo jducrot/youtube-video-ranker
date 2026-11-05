@@ -35,7 +35,7 @@ import json
 import sys
 from collections import Counter
 
-SCORER_VERSION = "3"   # 3: segment-aware watch plan, per-minute stop rule; scores unchanged
+SCORER_VERSION = "3"   # 3: segment-aware watch plan, per-minute stop rule (minutes floored at 3); scores unchanged
 
 POINT_VALUE = {
     "SUPPORTED": 1.0,
@@ -52,7 +52,10 @@ RELEVANCE_FLOOR = 0.4  # an off-topic video keeps at least this share of its sco
 STOP_BELOW = 0.10  # stop the watch plan when a whole video adds under 10% of total value
 SEGMENT_STOP_BELOW = 0.04  # ...and a single segment under 4% (segments are smaller by nature)
 MIN_RATE_FRACTION = 0.20   # ...or when it adds value at under 20% of the best pick's per-minute rate
-# (0.20 was set from one real run, where it dropped a 6-minute segment worth 5%; tune with more runs)
+RATE_MIN_MINUTES = 3.0     # a shorter segment is compared as if it were this long (see rate_of)
+# 0.20 was set from one real run (it dropped a 6-minute segment worth 5%). A second run showed
+# a 1.7-minute opening setting a rate so high that a 7-minute core tutorial section fell under
+# the cutoff; flooring the minutes in the comparison fixes that. Tune both with more runs.
 
 
 def point_value(p):
@@ -228,7 +231,9 @@ def build_watch_plan(vids, rows, points, total_value):
         return c["relevance"] * sum(point_value(points[i]) for i in c["ids"] - seen)
 
     def rate_of(c):
-        return gain(c) / total_value / c["minutes"]
+        # Floor the length: a 1.7-minute opening with a few points would otherwise set a rate
+        # so high that every real tutorial section looks slow beside it.
+        return gain(c) / total_value / max(c["minutes"], RATE_MIN_MINUTES)
 
     while remaining:
         # Only candidates that add enough, and add it fast enough, are eligible. Filtering

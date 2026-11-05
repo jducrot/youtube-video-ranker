@@ -207,3 +207,18 @@ def test_a_segment_past_the_end_is_only_a_warning(run_scorer):
     out = run_scorer({"videos": [_video("a", ["K1"], minutes=1, segments=[_seg(0, 600, ["K1"])])],
                       "points": PTS})
     assert any("ends after the video" in w for w in out["warnings"])
+
+
+def test_a_short_dense_opening_does_not_hide_a_core_tutorial_section(run_scorer):
+    # Found on a real run: a 1.7-minute opening with two core points had such a high rate that
+    # the 7-minute section holding the tutorial itself fell under 20% of it and was dropped.
+    pts = make_points(("K1", True, "SUPPORTED"), ("K2", True, "SUPPORTED"),
+                      ("K3", True, "SUPPORTED"), ("K4", False, "NOT_CHECKED"),
+                      *[(f"K{i}", False, "SUPPORTED") for i in range(5, 10)])
+    guide = _video("guide", ["K1", "K2", "K3", "K4"], minutes=10,
+                   segments=[_seg(0, 100, ["K1", "K2"]), _seg(100, 520, ["K3", "K4"])])
+    filler = _video("filler", [f"K{i}" for i in range(5, 10)], minutes=60)
+    out = run_scorer({"videos": [guide, filler], "points": pts})
+    steps = [(p["id"], p["start_s"], p["end_s"]) for p in out["watch_plan"]]
+    assert ("guide", 0, 100) in steps and ("guide", 100, 520) in steps
+    assert "filler" in out["skip_for_new_info"]
