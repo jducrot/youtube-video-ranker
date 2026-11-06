@@ -167,6 +167,7 @@ def cmd_ingest_factcheck(args: argparse.Namespace) -> int:
         rec["id"] = item.get("id")
         rec["verdict"] = item.get("verdict")
         rec["searches"] = int(item.get("searches", 0) or 0)
+        rec["fetched"] = int(item.get("fetched", 0) or 0)
         rec["cache_hit"] = 1 if item.get("cache_hit") in (1, True) else 0
         if args.model:
             rec["model"] = args.model
@@ -354,8 +355,12 @@ def _report_run(rid, evs):
     if facts:
         verdicts = Counter(f.get("verdict", "?") for f in facts)
         searches = sum(int(f.get("searches", 0)) for f in facts)
+        fetched = sum(int(f.get("fetched", 0) or 0) for f in facts)
         chits = sum(1 for f in facts if f.get("cache_hit") in (1, True))
-        print(f"FACTCHECK  checked={len(facts)}  searches={searches}  cache_hits={chits}")
+        no_lookup = sum(1 for f in facts if f.get("verdict") in ("SUPPORTED", "PARTLY", "OUTDATED", "CONTRADICTED")
+                        and not int(f.get("searches", 0) or 0) and not int(f.get("fetched", 0) or 0))
+        print(f"FACTCHECK  checked={len(facts)}  searches={searches}  fetches={fetched}  cache_hits={chits}"
+              + (f"  WARNING: {no_lookup} verdict(s) with no search or fetch recorded" if no_lookup else ""))
         print("        verdicts: " + ", ".join(f"{k}={v}" for k, v in verdicts.items()))
 
     nv = rs.get("n_videos") if rs else len(fetches)

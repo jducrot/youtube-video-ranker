@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.0
+
+Driven by the telemetry of five runs since 4.0.0 and by two single-video runs that both mis-logged.
+
+- **`write-pass`: the inventory agent no longer copies the transcript.** youtube-claims' `cache.py write` takes `{inputs, output}` and stores only a hash of the inputs, so each inventory agent was writing the whole transcript into a wrapper file twice per video just to be hashed. The telemetry cost model put the fixed cost at about 73K tokens per agent, 63% of inventory spend. `rank_tools.py write-pass {1|2} VIDEO_ID --output FILE --claims-dir DIR` builds the canonical inputs from the cache, runs verify-quotes before a Pass 2 write, writes the cache and (with `--run-id`) logs the inventory telemetry event. Checked against the real caches: the wrappers it writes carry the same `inputs_hash` and `prompt_hash` as the ones the agents produced, so the caches stay shared with youtube-claims. The inventory brief shrinks to two commands per video. The saving is a prediction until the next live run shows the fixed term fall.
+- **`draft-report`: the report's numbers are written by code.** It fills the header, the ranking table, the watch plan and its links, the conflicts table with every checked verdict and source, the per-video inventory counts and the limits facts from `rank_output.json`, the verdicts and the caches, and leaves `<!-- WRITE: ... -->` placeholders where judgment goes. `check-report` refuses a report that still holds a placeholder. In earlier runs the report stage took 1.3 to 1.7 minutes and produced every error the checker exists to catch. The draft of the real 2-video run passes `check-report` as soon as its placeholders are filled.
+- **Standalone read of one video.** `draft-report --single` and `check-report --single` (no rank, score or relevance; sections Verdict, The video, Watch plan, Claims checked, Notes, Limits), and a `Standalone read` section in `SKILL.md` that runs the same pipeline with the comparison parts switched off, so a single-video run leaves a reusable `verdicts.json`, a report and honest telemetry.
+- **Fact-check agents are grouped by size, not by source kind.** Measured about 65K tokens fixed per agent plus about 11K per point, so the skill now asks for two or three agents of 7 to 10 points. The brief reports `fetched` beside `searches`, and a checked verdict with no search or fetch is flagged by `build-input`, by `telemetry.py report`, and by the skill (treat it as `UNVERIFIED`). A live verdict had come back with `searches: 0`.
+- 139 tests.
+
 ## 4.1.0
 
 Driven by the telemetry and the report from a 6-video run (rifle zeroing), where the plan told the user to watch 38 minutes of which 13 were off-goal, the most actionable advice was never fact-checked, and two numbers in the report were wrong.
