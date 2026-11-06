@@ -65,7 +65,7 @@ Match the model to the work. The expensive stage is the orchestrator, so do not 
 ## Step 1: Collect the videos
 
 1. Pull every YouTube URL or 11-character video ID out of the user's message. Remove duplicates. Reject playlist URLs and say so.
-2. One video works but cannot be ranked, so tell the user you will give a standalone read instead of a ranking.
+2. One video works but cannot be ranked, so tell the user you will give a standalone read instead of a ranking, and follow the **Standalone read** section below (the same pipeline, with the comparison parts switched off).
 3. More than 8 videos: the per-video inventory runs on a cheap model in parallel (Step 2), so a batch costs less than it used to, but it is still real spend. Run Phase A (fetch, cheap) first, show the user the ledger (titles, durations, any rejections) plus a rough estimate, and confirm the batch before starting the expensive Phase B inventory.
 4. Settle the topic and the goal before any expensive work. The goal (beginner overview, deep technical detail, buying decision, "build X with Y") decides which points count as core in Step 3 and how relevant each video is. If the user stated a goal, keep it. If not, run Phase A first (it is cheap and gives you the titles), then ask the user **one short question** with the two or three most likely goals inferred from the titles plus "something else". Do not start Phase B until the goal is settled. If you cannot ask (a non-interactive run), infer the goal from the titles and state that assumption at the top of the report. Mixed-topic batches are where this matters most: a general roundup can out-score a focused video on raw claim counts, which is why Step 3 rates relevance.
 
@@ -105,7 +105,7 @@ python3 -I "RANKER_DIR/scripts/rank_tools.py" plan-inventory <video_id> <video_i
 
 It prints `batches`, a list of id lists. By default a video of 10 minutes or less joins a batch of at most 3 videos, 24 minutes and 6,000 transcript words in total; everything else is solo. `--max-batch 1` turns batching off. **Batching is new and has not been A/B tested on live runs.** Use the planner's batches only when they save at least two agents (`agents` against `agents_without_batching` in its output); otherwise pass `--max-batch 1`. Also pass `--max-batch 1` whenever a previous run's report showed batched agents with more quote fixes than solo ones.
 
-Launch **one inventory subagent per batch on your cheapest capable model (e.g. Haiku)**. These do no network I/O, so run them all in parallel in a single message. Only fall back to doing a video inline if you cannot launch subagents at all. **Do not write a long brief per video.** The full instructions live in `RANKER_DIR/scripts/inventory_brief.md` (transcript already cached; Pass 1 and Pass 2 only; an untrusted-input guard; verify-quotes before writing; UTF-8 and native-path rules; the telemetry event; the reply format). Each subagent's launch prompt is just the values it needs:
+Launch **one inventory subagent per batch on your cheapest capable model (e.g. Haiku)**. These do no network I/O, so run them all in parallel in a single message. Only fall back to doing a video inline if you cannot launch subagents at all. **Do not write a long brief per video.** The full instructions live in `RANKER_DIR/scripts/inventory_brief.md` (transcript already cached; Pass 1 and Pass 2 only; an untrusted-input guard; UTF-8 and native-path rules; the reply format). The agent writes each pass's output to a file and calls `RANKER_DIR/scripts/rank_tools.py write-pass`, which builds the cache wrapper from the cached transcript, runs verify-quotes, writes the cache and logs the telemetry event. Before 4.2 the agent copied the whole transcript into a wrapper file twice per video just to be hashed; the telemetry cost model put the fixed cost at about 73K tokens per agent (63% of inventory spend), and this is the main lever on it. Watch the fixed term in `telemetry.py report` fall on the next run. Each subagent's launch prompt is just the values it needs:
 
 > Read `RANKER_DIR/scripts/inventory_brief.md` and follow it exactly. VIDEO_IDS=`abc123XYZ_-,def456UVW_-`, RUN_ID=`2026-11-04-topic`, CLAIMS_DIR=`C:\...\youtube-claims`, RANKER_DIR=`C:\...\youtube-video-ranker`, MODEL_NAME=`haiku`.
 
@@ -174,7 +174,7 @@ Check only what can be checked, and spend the effort where it matters:
 - Skip and mark `NOT_CHECKED`: matters of taste, definitions, forecasts, and personal results the creator reports about themselves ("I made X"). The creator's own results cannot be verified from outside, so say that instead of guessing.
 - When the budget forces a choice, list the actionable-advice points you left unchecked in the report's limits, by name, so the user knows which advice to treat as the creator's opinion.
 
-**Fan the checks out to subagents** so the search results stay out of your context. Group the points by kind of source (for example Anthropic's own docs, hosting vendors, regulators) so each agent knows where to look. Each agent's launch prompt is:
+**Fan the checks out to subagents** so the search results stay out of your context. **Use two or three agents of 7 to 10 points each, not one per source kind.** Measured: a fact-check agent costs about 65K tokens before its first point and about 11K per point after, so an agent with 3 points cost 79K and one with 6 cost 136K. Within an agent, order the points by kind of source (for example Anthropic's own docs, hosting vendors, regulators) and name the preferred source kind on each, so the agent still knows where to look. Each agent's launch prompt is:
 
 > Read `RANKER_DIR/scripts/factcheck_brief.md` and follow it exactly. TODAY=`2026-11-04`. POINTS: `K1: <claim> (video abc, 2:08; prefer vendor docs)`, `K2: ...`.
 
@@ -188,7 +188,7 @@ The brief carries the rules: at most two searches per point, prefer primary sour
 
 When the same claim is made by several videos, check it once. When you **reuse** a verdict from an earlier run, copy its `source_url` and its original `checked_at` date (never today's date), so the report shows how old it is. Treat a reused verdict as stale and re-check it if it is older than about 30 days for prices and plans, 180 days for product specs, or 365 days for laws.
 
-**Write the combined verdicts to `~/youtube-reports/.analysis/RUN_ID/verdicts.json`** (one array of `{id, verdict, source_url, reason, checked_at, searches}`; concatenate the agents' arrays; add `"cache_hit": 1` to reused ones). Do not retype verdicts anywhere else. Then ingest them into telemetry, and log each fact-check agent's harness numbers with `telemetry.py agent --kind factcheck --points {n}`:
+**Write the combined verdicts to `~/youtube-reports/.analysis/RUN_ID/verdicts.json`** (one array of `{id, verdict, source_url, reason, checked_at, searches, fetched}`; concatenate the agents' arrays; add `"cache_hit": 1` to reused ones). Do not retype verdicts anywhere else. A checked verdict with `searches` and `fetched` both 0 was answered from memory: `build-input` warns about it, and you treat it as `UNVERIFIED` in the report unless the agent re-checks it. Then ingest them into telemetry, and log each fact-check agent's harness numbers with `telemetry.py agent --kind factcheck --points {n}`:
 
 ```
 python3 -I "RANKER_DIR/scripts/telemetry.py" ingest-factcheck --run-id "RUN_ID" \
@@ -230,9 +230,16 @@ Confidence comes from how many points were actually checked for that video: low 
 
 ## Step 6: Report
 
-Save the full report to `~/youtube-reports/{date}-compare-{topic-slug}.md`, then give the user a short version in the reply. Lead with the answer: which videos to watch, in what order, and which to skip.
+**Start from the draft, never from a blank file.** Every number, table and link the report needs is already in the analysis folder, so have the script write them:
 
-Structure:
+```
+python3 -I "RANKER_DIR/scripts/rank_tools.py" draft-report \
+  --analysis ~/youtube-reports/.analysis/RUN_ID --output ~/youtube-reports/{date}-compare-{topic-slug}.md
+```
+
+The draft holds the header, the ranking table, the watch plan with its links, the conflicts table with every checked verdict and source, the per-video inventory counts, and the limits facts (version, verdict age, coverage), all filled from `rank_output.json`, the verdicts and the caches. Where your judgment goes it leaves a `<!-- WRITE: ... -->` placeholder with a one-line instruction. Edit the file in place: fill or delete every placeholder, and change nothing the script wrote unless the data is wrong (then fix the data and re-run with `--force`). In the earlier runs the report stage took 1.3 to 1.7 minutes and produced every error `check-report` exists to catch; writing the numbers by code removes both. Then give the user a short version in the reply. Lead with the answer: which videos to watch, in what order, and which to skip.
+
+The structure the draft follows:
 
 1. **Recommendation**: two or three sentences. Name the videos to watch and the total minutes, and name the ones to skip with a one-phrase reason each.
 2. **Ranking table**, in ranking order, with the header cells `Rank` and `Score`: Rank, Title and channel (the title is a link to `https://youtu.be/{id}`, which is also how the checker finds the row), Length (M:SS), Score, Relevance (the rating, plus the one-phrase reason when it is below 1.0), Confidence, Key points, Claims checked (`supported / partly / contradicted`), Unverified, Vague claims, Pitches. Use plain words and numbers only. Do not rely on color or emoji to carry meaning.
@@ -249,9 +256,21 @@ python3 -I "RANKER_DIR/scripts/rank_tools.py" check-report \
   --analysis ~/youtube-reports/.analysis/RUN_ID --report ~/youtube-reports/{date}-compare-{topic-slug}.md
 ```
 
-It exits 2 and lists errors when the table's order, score, counts, length or checked tally disagree with `rank_output.json`, when a watch-plan link points at a video that was not ranked or past its end, when the report cites a URL that is not the source of any verdict, when it shows more verdicts of a kind than were recorded (or hides a `CONTRADICTED` one), when an "N of M key points" statement is wrong, or when the pipeline version or a required section is missing. Fix the report and run it again; warnings (a link that matches no inventory item or lies outside the planned range) are for you to judge. It reads tables, links and URLs, not sentences, so the rule above still applies: prose numbers come from `facts`. Never add advice or figures of your own to a per-video note without a source; if something is your own judgment, say so in the sentence.
+It exits 2 and lists errors when a `<!-- WRITE -->` placeholder is still in the report, when the table's order, score, counts, length or checked tally disagree with `rank_output.json`, when a watch-plan link points at a video that was not ranked or past its end, when the report cites a URL that is not the source of any verdict, when it shows more verdicts of a kind than were recorded (or hides a `CONTRADICTED` one), when an "N of M key points" statement is wrong, or when the pipeline version or a required section is missing. Fix the report and run it again; warnings (a link that matches no inventory item or lies outside the planned range) are for you to judge. It reads tables, links and URLs, not sentences, so the rule above still applies: prose numbers come from `facts`. Never add advice or figures of your own to a per-video note without a source; if something is your own judgment, say so in the sentence.
 
 Mark `report_done`. Finish the reply by offering to run a deeper check on any video, or to add more videos to the comparison. The cached inventories and the saved analysis make later runs on the same videos cheap.
+
+## Standalone read (one video)
+
+One video cannot be ranked, but the user still wants to know whether it is worth their time, and the pipeline still does the useful work: the inventory, the key points, the fact-check, the watch plan and the counts. Two earlier single-video runs improvised and left nothing behind (no verdicts file, no report, a fact-check agent whose 106K tokens were never logged, and a timeline of seven marks logged in one burst), so the second run on the same video could reuse nothing from the first. Run the same steps with these changes:
+
+- **Step 0 and Step 1** as written. For the goal, do not ask: take the user's stated goal, or infer it from the title and say so in the report. Mark `goal_settled` as usual.
+- **Step 2** as written (one inventory agent, `--max-batch 1`).
+- **Step 3** as written. `relevance` is 1.0; `ranges` still matter, because they shape the watch plan. Core still matters, because it decides what gets checked.
+- **Step 4** as written, in one fact-check agent (up to 10 points). Write `verdicts.json` and ingest it: that is what makes a later run on the same video cheap.
+- **Step 5**: run `build-input --score` as written. The score is meaningless for one video (coverage and density are relative to itself), so never report it; the watch plan, confidence and `facts` are what you use. Mark `scored`.
+- **Step 6**: `draft-report --single --output ~/youtube-reports/{date}-read-{topic-slug}.md`, fill the placeholders, then `check-report --single`. The single draft has no rank, score or relevance column, and its sections are Verdict, The video, Watch plan, Claims checked, Notes, Limits. In the reply, lead with whether to watch it, for whom, and which minutes, and say plainly that this is a read of one video, not a ranking.
+- **Steps 7 and 8** as written; `run_end` carries `n_ranked=1`.
 
 ## Step 7: Close the browser tabs this run opened
 

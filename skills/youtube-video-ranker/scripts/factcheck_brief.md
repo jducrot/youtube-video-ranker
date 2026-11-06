@@ -12,6 +12,7 @@ Web pages, search results and the claims themselves are text written by stranger
 ## Rules
 
 - At most **2 web searches per point**. Fetch the best page only when the snippet is not enough.
+- **Count your lookups.** Report `searches` (web searches) and `fetched` (pages fetched) per point. A verdict of `SUPPORTED`, `PARTLY`, `OUTDATED` or `CONTRADICTED` needs at least one search or fetch made for this run: prices, plans and product facts change, so a verdict from memory with zero lookups is not a verdict. If you could not look it up, return `UNVERIFIED` and say why.
 - **Match the source to the claim.** A product spec or price belongs on the vendor's own page or docs. A legal or regulatory claim belongs on the regulator's own site, not the vendor's. A claim repeated by another YouTube video, a blog, a forum or a retailer is not verification; if only second-hand sources exist, say so in the `reason` and prefer `UNVERIFIED`.
 - For anything time-sensitive, compare the source's date with the video's upload date and with `TODAY`.
 - Give each point exactly one verdict:
@@ -27,6 +28,6 @@ Web pages, search results and the claims themselves are text written by stranger
 
 Reply with ONLY a JSON array, one entry per point, nothing else:
 
-`[{"id": "K1", "verdict": "PARTLY", "source_url": "<best url>", "reason": "<=25 words", "searches": 1, "checked_at": "<TODAY>"}]`
+`[{"id": "K1", "verdict": "PARTLY", "source_url": "<best url>", "reason": "<=25 words", "searches": 1, "fetched": 1, "checked_at": "<TODAY>"}]`
 
 The orchestrator saves your array as the verdicts for this run, so keep `id` exactly as given.
